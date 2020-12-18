@@ -47,6 +47,7 @@ namespace WebViewControl {
 
         internal class JavascriptExecutor : IDisposable {
 
+            private const string TimeoutExceptionName = "Timeout";
             private const string InternalException = "|WebViewInternalException";
 
             private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
@@ -147,8 +148,10 @@ namespace WebViewControl {
                     var frameName = frame.Name;
                     try {
                         var timeout = OwnerWebView.DefaultScriptsExecutionTimeout ?? DefaultTimeout;
-                        var task = OwnerWebView.chromium.EvaluateJavaScript<object>(WrapScriptWithErrorHandling(script), timeout: timeout);
-                        task.Wait(FlushTaskCancelationToken.Token);
+                        var task = OwnerWebView.chromium.EvaluateJavaScript<object>(WrapScriptWithErrorHandling(script));
+                        if (!task.Wait((int) timeout.TotalMilliseconds, FlushTaskCancelationToken.Token)) {
+                            throw new JavascriptException(TimeoutExceptionName, "Script execution timed out");
+                        }
                     } catch (OperationCanceledException) { 
                         // ignore
                     } catch (Exception e) {
@@ -159,7 +162,6 @@ namespace WebViewControl {
             }
 
             public async Task<T> EvaluateScript<T>(string script, string functionName = null, TimeSpan? timeout = null) {
-                const string TimeoutExceptionName = "Timeout";
 #if DEBUG
                 System.Diagnostics.Debug.WriteLine($"{nameof(EvaluateScript)} '{script}' on ('{Id}')");
 #endif
@@ -170,14 +172,14 @@ namespace WebViewControl {
                     System.Diagnostics.Debug.WriteLine($"Evaluating '{script}' on ('{Id}')");
 #endif
                     try {
-                        var innerEvaluationTask = OwnerWebView.chromium.EvaluateJavaScript<T>(WrapScriptWithErrorHandling(scriptToEvaluate), timeout: timeout);
-                        innerEvaluationTask.Wait(FlushTaskCancelationToken.Token);
+                        var innerEvaluationTask = OwnerWebView.chromium.EvaluateJavaScript<T>(WrapScriptWithErrorHandling(scriptToEvaluate));
+                        if (!innerEvaluationTask.Wait((int?) timeout?.TotalMilliseconds ?? -1, FlushTaskCancelationToken.Token)) { 
+                            throw new JavascriptException(TimeoutExceptionName, "Script evaluation timed out");
+                        }
                         evaluationTask.SetResult(GetResult<T>(innerEvaluationTask.Result));
                     } catch (Exception e) {
                         if (FlushTaskCancelationToken.IsCancellationRequested) {
                             evaluationTask.SetCanceled();
-                        } else if (e.InnerException is TaskCanceledException) {
-                            evaluationTask.SetException(new JavascriptException(TimeoutExceptionName, "Script evaluation timed out"));
                         } else {
                             evaluationTask.SetException(ParseException(e, new[] { functionName }));
                         }

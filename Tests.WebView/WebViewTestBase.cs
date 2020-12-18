@@ -17,7 +17,7 @@ namespace Tests.WebView {
         protected override async Task AfterInitializeView() {
             await base.AfterInitializeView();
 
-            var taskCompletionSource = new TaskCompletionSource<bool>();
+            var taskCompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             TargetView.WebViewInitialized += () => {
                 taskCompletionSource.SetResult(true);
             };
@@ -30,11 +30,17 @@ namespace Tests.WebView {
             var taskCompletionSource = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             
             void OnNavigated(string url, string frameName) {
-                if (url != UrlHelper.AboutBlankUrl) {
+                if (url != UrlHelper.AboutBlankUrl && !UrlHelper.IsChromeInternalUrl(url)) {
                     TargetView.Navigated -= OnNavigated;
                     taskCompletionSource.SetResult(true);
                 }
             }
+
+            void OnLoadFailed(string url, int errorCode, string frameName) {
+                taskCompletionSource.SetException(new Exception("Error loading html: " + errorCode));
+            }
+
+            TargetView.LoadFailed += OnLoadFailed;
             TargetView.Navigated += OnNavigated;
             TargetView.LoadHtml(html);
             return taskCompletionSource.Task;
